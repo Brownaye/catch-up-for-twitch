@@ -13,3 +13,6 @@ Thumbs.db
 desktop.ini
 .vscode/
 .idea/
+
+# Raw DevTools captures (converted copies are committed as store/screenshot-*.png)
+store/cmlhgkcghkodgadoibcgfkmkjkjcnagm-*.png

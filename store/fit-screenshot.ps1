@@ -10,7 +10,9 @@
 param(
   [Parameter(Mandatory = $true)][string]$In,
   [Parameter(Mandatory = $true)][string]$Out,
-  [switch]$Center
+  [switch]$Center,
+  [int]$Trim = 0,        # -Center: pixels to shave off every edge of the capture (window borders)
+  [double]$Zoom = 1.0    # -Center: enlarge the capture up to this factor (still capped to fit)
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -39,9 +41,10 @@ if ($Center) {
     $brush.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 14, 14, 16))
     $g.FillPath($brush, $path)
   }
+  $cw = $src.Width - 2 * $Trim; $ch = $src.Height - 2 * $Trim
   $maxW = $W - 160; $maxH = $H - 120
-  $s = [Math]::Min(1.0, [Math]::Min($maxW / $src.Width, $maxH / $src.Height))
-  $dw = [int]($src.Width * $s); $dh = [int]($src.Height * $s)
+  $s = [Math]::Min($Zoom, [Math]::Min($maxW / $cw, $maxH / $ch))
+  $dw = [int]($cw * $s); $dh = [int]($ch * $s)
   $dx = [int](($W - $dw) / 2); $dy = [int](($H - $dh) / 2)
   # soft shadow
   $sh = New-Object System.Drawing.Drawing2D.GraphicsPath
@@ -50,8 +53,10 @@ if ($Center) {
   $sb.CenterColor = [System.Drawing.Color]::FromArgb(160, 0, 0, 0)
   $sb.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 0, 0, 0))
   $g.FillPath($sb, $sh)
-  $g.DrawImage($src, $dx, $dy, $dw, $dh)
-  $mode = "centred at {0}x{1}" -f $dw, $dh
+  $destR = New-Object System.Drawing.Rectangle $dx, $dy, $dw, $dh
+  $srcR = New-Object System.Drawing.Rectangle $Trim, $Trim, $cw, $ch
+  $g.DrawImage($src, $destR, $srcR, [System.Drawing.GraphicsUnit]::Pixel)
+  $mode = "centred at {0}x{1}, trim {2}, zoom {3:N2}" -f $dw, $dh, $Trim, $s
 } else {
   $scale = $W / $src.Width
   $scaledH = [int][Math]::Round($src.Height * $scale)

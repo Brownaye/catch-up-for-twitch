@@ -12,7 +12,7 @@ see every VOD from the last few days in one list, tick off what you've
 watched, and jump back into a stream exactly where you left off.
 
 <!-- Uncomment once the listing is live:
-[![Available in the Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/catch-up-for-twitch/hpehimbcjnfjagfgjfjijcdcgappobmh)
+[![Available in the Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/catch-up-for-twitch/cmlhgkcghkodgadoibcgfkmkjkjcnagm)
 -->
 
 </div>
@@ -55,7 +55,7 @@ Quick settings live in the toolbar popup and in the gear on the inbox page.
 
 <!-- ### From the Chrome Web Store — recommended
 
-[![Available in the Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/catch-up-for-twitch/hpehimbcjnfjagfgjfjijcdcgappobmh)
+[![Available in the Chrome Web Store](https://img.shields.io/badge/Chrome_Web_Store-Install-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white)](https://chromewebstore.google.com/detail/catch-up-for-twitch/cmlhgkcghkodgadoibcgfkmkjkjcnagm)
 
 One click and you're set — this is the right way to install for everyone who
 isn't editing the code, because updates then arrive automatically. If you want

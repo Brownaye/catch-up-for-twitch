@@ -23,6 +23,9 @@
 
 * { box-sizing: border-box; }
 
+/* The hidden attribute must win over any display rule (flex/grid/block). */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: var(--font);

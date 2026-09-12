@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtKJ1T+UYBr1z6mvi2v7vfF47NlBQgfTsiwWKW9smagAf4hnZ2idDZEmzs8B4tzt3Lg+lKw89gU7E95m2UGElGtbBMxNWXexyInLkJB/uUSyKVjbXWscAJbUWPEOIDKTHhAIQF2Izkr/Iv/W3GsqQVIE450EYSB8Mb4GXM+oa1RAbXyrk/IoBKkgydxoP4D7rGVHosiHEGdMK83e1FXTORreNxfVPY87XhhuHoilNDHsdFizTAw2f86Hims0AZLCDfw8A/mPQY2mxUXTmnuFlJiPfEoQggVkZqealsdEjCJXqlBt1dFoiq4nCMqAGA8bZsldhVfBAxzSWyJ6YZMjkVQIDAQAB",
+  "name": "Catch Up for Twitch",
+  "version": "1.0.0",
+  "description": "An inbox of the streams you missed. Pick your channels, see their recent VODs, and jump straight back in where you left off.",
+  "permissions": [
+    "identity",
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://api.twitch.tv/*",
+    "https://id.twitch.tv/*",
+    "https://www.twitch.tv/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Catch Up for Twitch"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.twitch.tv/videos/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

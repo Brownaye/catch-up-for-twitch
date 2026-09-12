@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Welcome — Catch Up for Twitch</title>
+  <link rel="icon" href="icons/icon32.png" />
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(900px 500px at 85% -10%, rgba(100, 44, 165, 0.45), transparent 60%),
+        radial-gradient(700px 500px at -10% 110%, rgba(70, 30, 120, 0.35), transparent 60%),
+        var(--bg-deep);
+      display: flex;
+      justify-content: center;
+      padding: 44px 16px 60px;
+    }
+    .wrap { max-width: 680px; width: 100%; }
+
+    /* hero */
+    .hero { text-align: center; margin-bottom: 28px; }
+    .hero img {
+      width: 96px; height: 96px;
+      border-radius: 22px;
+      box-shadow: 0 8px 40px rgba(145, 71, 255, 0.35);
+      margin-bottom: 14px;
+    }
+    h1 { font-size: 26px; margin: 0 0 6px; }
+    .tagline { color: var(--muted); font-size: 15px; margin: 0; }
+
+    /* demo inbox row */
+    .demo {
+      display: flex;
+      justify-content: center;
+      margin: 26px 0 10px;
+    }
+    .demo-row {
+      width: 100%;
+      max-width: 560px;
+      display: grid;
+      grid-template-columns: 14px auto 1fr auto;
+      align-items: center;
+      gap: 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 12px 14px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    }
+    .demo-row .avatar {
+      width: 36px; height: 36px;
+      background: radial-gradient(circle at 35% 35%, #bf94ff, #5c2aa8);
+    }
+    .demo-row .who { display: flex; align-items: center; gap: 10px; }
+    .demo-row .name { font-weight: 600; font-size: 14px; }
+    .demo-row .thumb {
+      width: 96px; height: 54px;
+      background:
+        radial-gradient(60px 40px at 30% 70%, #8a3bd0, transparent 70%),
+        radial-gradient(70px 50px at 75% 20%, #3b6ad0, transparent 70%),
+        linear-gradient(135deg, #1b1230, #241a3f);
+    }
+    .demo-row .vod { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .demo-row .title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .demo-row .line { font-size: 11px; color: var(--muted); }
+    .demo-row button { padding: 7px 12px; font-size: 12px; }
+    .demo-caption {
+      text-align: center;
+      color: var(--muted); font-size: 13px;
+      margin: 0 0 26px;
+    }
+
+    /* steps */
+    .card { padding: 24px; }
+    .step { display: flex; gap: 14px; align-items: flex-start; }
+    .step + .step { margin-top: 22px; }
+    .num {
+      background: var(--accent); color: #fff;
+      width: 26px; height: 26px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; flex-shrink: 0;
+      margin-top: 1px;
+    }
+    .step h2 { font-size: 15px; margin: 2px 0 5px; }
+    .step p { font-size: 13.5px; color: var(--muted); margin: 0; line-height: 1.55; }
+    kbd {
+      background: var(--panel); border-radius: 4px;
+      padding: 1px 6px; font-size: 12px;
+    }
+    .big-btn {
+      display: block;
+      width: 100%;
+      border-radius: 10px;
+      padding: 16px 22px;
+      font-size: 16px;
+      margin-top: 12px;
+      box-shadow: 0 6px 28px rgba(145, 70, 255, 0.4);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .big-btn:hover {
+      background: var(--accent-hover);
+      box-shadow: 0 8px 34px rgba(145, 70, 255, 0.55);
+    }
+    .big-btn:disabled { background: #3a3a3d; color: #999; animation: none; box-shadow: none; cursor: default; opacity: 1; }
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 6px 24px rgba(145, 70, 255, 0.35); }
+      50% { transform: scale(1.02); box-shadow: 0 8px 36px rgba(145, 70, 255, 0.6); }
+    }
+    .urgency {
+      margin: 12px 0 0;
+      font-size: 13.5px;
+      color: var(--warn) !important;
+      font-weight: 600;
+    }
+    #done { display: none; margin-top: 10px; }
+    #done .msg {
+      color: var(--ok); font-size: 14px; font-weight: 600;
+      margin: 0 0 10px;
+    }
+    .btn-link {
+      display: block;
+      width: 100%;
+      background: var(--accent); color: #fff;
+      border-radius: 10px;
+      padding: 15px 22px;
+      font-size: 16px; font-weight: 600;
+      text-align: center;
+      text-decoration: none;
+      animation: glow 2s ease-in-out infinite;
+    }
+    .btn-link:hover {
+      background: var(--accent-hover);
+      box-shadow: 0 8px 44px rgba(169, 112, 255, 0.85);
+    }
+    @keyframes glow {
+      0%, 100% { box-shadow: 0 6px 24px rgba(145, 70, 255, 0.45); }
+      50% { box-shadow: 0 8px 44px rgba(169, 112, 255, 0.9); }
+    }
+
+    .foot {
+      text-align: center;
+      color: #6e6e78; font-size: 12px;
+      margin-top: 24px; line-height: 1.7;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="hero">
+      <img src="icons/icon128.png" alt="" />
+      <h1>Catch Up for Twitch</h1>
+      <p class="tagline">An inbox of the streams you slept through. Pick your channels, see what you missed, jump straight in.</p>
+    </div>
+
+    <div class="demo" aria-hidden="true">
+      <div class="demo-row">
+        <span class="dot"></span>
+        <div class="who">
+          <span class="avatar"></span>
+          <span class="name">streamer</span>
+        </div>
+        <div class="vod">
+          <span class="thumb"></span>
+          <div>
+            <div class="title">Ranked grind until we hit Diamond</div>
+            <div class="line">Fri 11 Sep, 3:12 am · 4h 12m · 14 hours ago</div>
+          </div>
+        </div>
+        <button type="button" tabindex="-1">Catch up</button>
+      </div>
+    </div>
+    <p class="demo-caption">One row per channel, newest VOD first, with a purple dot until you've watched it.</p>
+
+    <div class="card">
+      <div class="step">
+        <div class="num">1</div>
+        <div>
+          <h2>Pin the extension</h2>
+          <p>Click the puzzle piece <kbd>&#129513;</kbd> next to your address bar, then the pin beside <strong>Catch Up for Twitch</strong>. The icon shows your unread count and opens the inbox. The popup also holds the quick settings: how many days to look back, and your sleep hours.</p>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">2</div>
+        <div>
+          <h2>Connect your Twitch account</h2>
+          <p>A one-time standard Twitch login, needed because Twitch's API requires it to read your follow list and each channel's past broadcasts. Your login stays in your browser. No tracking, no data collection, nothing sent anywhere else.</p>
+          <p class="urgency">&#9888; The inbox stays empty until this is done. One click, ten seconds.</p>
+          <button id="connectBtn" class="big-btn">Connect Twitch</button>
+          <div id="done">
+            <p class="msg">Connected! You're all set.</p>
+            <a class="btn-link" href="app.html" id="openApp">Pick your channels</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="num">3</div>
+        <div>
+          <h2>Pick channels and catch up</h2>
+          <p>Tick the channels you care about. From then on the inbox lists every VOD from the last 7 days, marks what you've watched, and remembers where you stopped so "Catch up" resumes from that spot.</p>
+        </div>
+      </div>
+    </div>
+
+    <p class="foot">
+      Your access token is stored only in this browser and can be revoked any time from your Twitch account's Connections settings.<br />
+      Not affiliated with Twitch Interactive, Inc.
+    </p>
+
+  </div>
+  <script src="welcome.js"></script>
+</body>
+</html>

@@ -86,6 +86,21 @@ cache:    { users: { [id]: {id, login, name, avatar, fetchedAt, missing?} },
 Cache TTLs: VODs and live 5 minutes, users 24 hours. `watched` and `resume`
 entries older than 90 days are pruned on install/startup.
 
+## Releasing
+
+Two different zips, both built into `dist/` (gitignored):
+
+- **Store upload** (`…-store.zip`): extension files at the zip root with the
+  manifest `key` line removed, per Google's flow. Uploaded on the dashboard's
+  Package tab.
+- **GitHub release** (`catch-up-for-twitch-<ver>.zip`): a top-level
+  `catch-up-for-twitch/` folder with the `key` kept, plus README and PRIVACY.
+  Loaded unpacked it gets the store's extension ID, so Twitch login works.
+  Published with `gh release create v<ver> dist/<zip> --latest`.
+
+Bump `version` in manifest.json before either; the store rejects a version
+that is not higher than the last upload.
+
 ## Testing
 
 Load unpacked, open the service-worker console from `chrome://extensions`,

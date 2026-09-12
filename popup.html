@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    body { width: 320px; }
+    .count-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .count-row .n {
+      font-size: 26px;
+      font-weight: 700;
+      line-height: 1;
+      color: var(--accent);
+    }
+    .count-row .n.zero { color: var(--muted); }
+    .count-row .l { color: var(--muted); font-size: 12px; line-height: 1.3; }
+    .times { display: flex; align-items: center; gap: 6px; }
+    .times input[type="time"] { width: 86px; }
+  </style>
+</head>
+<body>
+  <header>Catch Up for Twitch</header>
+
+  <div class="section" id="inboxSection" style="display:none">
+    <div class="count-row">
+      <span class="n" id="unread">0</span>
+      <span class="l" id="unreadLabel">unread VODs</span>
+    </div>
+    <button id="openBtn" class="block">Open Catch Up</button>
+  </div>
+
+  <div class="section" id="settingsSection" style="display:none">
+    <div class="row">
+      <label for="lookbackDays">Look back (days)</label>
+      <input type="number" id="lookbackDays" min="1" max="60" step="1" />
+    </div>
+    <div class="row">
+      <label for="sleepStart">Sleep hours</label>
+      <div class="times">
+        <input type="time" id="sleepStart" />
+        <span class="muted small">to</span>
+        <input type="time" id="sleepEnd" aria-label="Sleep end" />
+      </div>
+    </div>
+  </div>
+
+  <div class="section" id="setup" style="display:none">
+    <button id="connectBtn" class="block">Connect Twitch account</button>
+  </div>
+
+  <div class="section" id="connectedView" style="display:none">
+    <button id="disconnectBtn" class="secondary block">Disconnect Twitch account</button>
+  </div>
+
+  <div class="section" style="border-bottom:none; padding-top:8px;">
+    <div id="status"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Catch Up for Twitch</title>
+  <link rel="icon" href="icons/icon32.png" />
+  <link rel="stylesheet" href="theme.css" />
+  <style>
+    body {
+      min-height: 100vh;
+      background:
+        radial-gradient(900px 500px at 85% -10%, rgba(100, 44, 165, 0.45), transparent 60%),
+        radial-gradient(700px 500px at -10% 110%, rgba(70, 30, 120, 0.35), transparent 60%),
+        var(--bg-deep);
+      padding: 24px 16px 60px;
+    }
+    .wrap { max-width: 900px; margin: 0 auto; }
+
+    /* ---------- top bar ---------- */
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .topbar img { width: 36px; height: 36px; border-radius: 9px; }
+    .topbar h1 { font-size: 20px; margin: 0; }
+    .topbar .unread {
+      background: var(--accent);
+      color: #fff;
+      border-radius: 999px;
+      padding: 2px 9px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .topbar .unread.zero { background: var(--panel); color: var(--muted); }
+    .topbar .actions { margin-left: auto; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .topbar .actions button { padding: 7px 11px; font-size: 12px; }
+
+    .banner { margin-bottom: 14px; }
+    .banner[hidden] { display: none; }
+
+    /* ---------- settings panel ---------- */
+    #settingsPanel { margin-bottom: 14px; }
+    #settingsPanel .section:last-child { border-bottom: none; }
+    #settingsPanel .row { max-width: 440px; }
+    .who { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+    .who img { width: 22px; height: 22px; border-radius: 50%; }
+
+    /* ---------- cards / views ---------- */
+    .view[hidden] { display: none; }
+    .card { overflow: hidden; }
+    .card header { display: flex; align-items: center; gap: 10px; }
+    .card header .sub { font-weight: 400; color: var(--muted); font-size: 12px; }
+    .card header .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+    /* ---------- channel picker ---------- */
+    .picker-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .picker-tools input[type="search"] { flex: 1; min-width: 200px; padding: 8px 10px; font-size: 13px; }
+    .picker-tools .links { display: flex; gap: 4px; align-items: center; }
+    #pickerList {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      max-height: 60vh;
+      overflow-y: auto;
+    }
+    #pickerList li { border-bottom: 1px solid var(--border); }
+    #pickerList li:last-child { border-bottom: none; }
+    #pickerList label {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 14px;
+      cursor: pointer;
+    }
+    #pickerList label:hover { background: rgba(255, 255, 255, 0.03); }
+    #pickerList .name { flex: 1; font-size: 14px; }
+    #pickerList .login { color: var(--muted); font-size: 12px; }
+    .picker-foot { display: flex; align-items: center; gap: 12px; }
+    .picker-foot .count { color: var(--muted); font-size: 12px; }
+    .picker-foot .spacer { flex: 1; }
+    .picker-foot button { padding: 9px 18px; }
+
+    /* ---------- inbox ---------- */
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+    #inboxList { list-style: none; margin: 0; padding: 0; }
+    #inboxList > li { border-bottom: 1px solid var(--border); }
+    #inboxList > li:last-child { border-bottom: none; }
+
+    .chan {
+      display: grid;
+      grid-template-columns: 14px 200px 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      cursor: pointer;
+    }
+    .chan:hover { background: rgba(255, 255, 255, 0.03); }
+    .chan:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .chan .dot { visibility: hidden; }
+    .chan.has-unread .dot { visibility: visible; }
+    .chan .who { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--text); font-size: 14px; }
+    .chan .who .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chan .who .avatar { width: 36px; height: 36px; }
+    .chan .who .meta { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .chan .who .tag { align-self: flex-start; }
+    .chan .controls { display: flex; align-items: center; gap: 6px; }
+    .chan .chev { transition: transform 0.15s; }
+    .chan[aria-expanded="true"] .chev { transform: rotate(180deg); }
+    .chan .none { color: var(--muted); font-size: 13px; }
+
+    .vod { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .vod .thumb-wrap { position: relative; flex-shrink: 0; }
+    .vod .thumb.placeholder {
+      display: flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 11px; font-weight: 600;
+      background: linear-gradient(135deg, #1b1230, #241a3f);
+    }
+    .vod .dur {
+      position: absolute; right: 6px; bottom: 6px;
+      background: rgba(0, 0, 0, 0.8); color: #fff;
+      font-size: 11px; font-weight: 600; padding: 1px 5px; border-radius: 3px;
+    }
+    .vod .info { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+    .vod .title {
+      font-size: 14px; font-weight: 600;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .vod .line { color: var(--muted); font-size: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .vod .line .sep::before { content: "·"; }
+    .vod.watched .thumb-wrap, .vod.watched .info { opacity: 0.5; }
+    .vod .tick { color: var(--ok); font-weight: 700; }
+
+    .vodlist { list-style: none; margin: 0; padding: 4px 14px 12px 46px; background: rgba(0, 0, 0, 0.18); }
+    .vodlist li {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .vodlist li:last-child { border-bottom: none; }
+    .vodlist .controls { display: flex; align-items: center; gap: 6px; }
+    .vodlist .controls button { padding: 6px 10px; font-size: 12px; }
+    .vodlist .empty { display: block; color: var(--muted); padding: 10px 0; }
+
+    .empty-state { text-align: center; padding: 48px 20px; color: var(--muted); }
+    .empty-state .big { font-size: 40px; margin-bottom: 8px; }
+    .empty-state h2 { color: var(--text); font-size: 18px; margin: 0 0 6px; }
+    .empty-state p { margin: 0 0 14px; }
+
+    .foot { text-align: center; color: #6e6e78; font-size: 12px; margin-top: 24px; line-height: 1.7; }
+    .foot a { color: #8f8f9b; }
+
+    @media (max-width: 720px) {
+      .chan { grid-template-columns: 14px 1fr auto; }
+      .chan .vod { grid-column: 2 / span 2; }
+      .vod .thumb { width: 96px; height: 54px; }
+      .vodlist { padding-left: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+
+    <div class="topbar">
+      <img src="icons/icon128.png" alt="" />
+      <h1>Catch Up</h1>
+      <span class="unread zero" id="unreadPill" aria-live="polite">0 unread</span>
+      <div class="actions" id="inboxActions" hidden>
+        <button id="refreshBtn" class="secondary" title="Fetch the latest VODs">Refresh</button>
+        <button id="markAllBtn" class="secondary">Mark all read</button>
+        <button id="manageBtn" class="secondary">Manage channels</button>
+        <button id="settingsBtn" class="icon" aria-label="Settings" aria-expanded="false" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="banner err" id="banner" hidden>
+      <span id="bannerText"></span>
+      <span class="spacer"></span>
+      <button id="bannerAction"></button>
+      <button class="icon" id="bannerDismiss" aria-label="Dismiss">&times;</button>
+    </div>
+
+    <div class="card" id="settingsPanel" hidden>
+      <header>Settings</header>
+      <div class="section">
+        <div class="row">
+          <label for="lookbackDays">Look back (days)</label>
+          <input type="number" id="lookbackDays" min="1" max="60" step="1" />
+        </div>
+        <div class="row">
+          <label for="sleepStart">Sleep hours</label>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <input type="time" id="sleepStart" />
+            <span class="muted">to</span>
+            <input type="time" id="sleepEnd" aria-label="Sleep end" />
+          </div>
+        </div>
+        <div class="row">
+          <span class="muted small">Used by the "Missed while asleep" filter. Times are in your local timezone.</span>
+        </div>
+      </div>
+      <div class="section">
+        <div class="row">
+          <span class="who" id="whoAmI"></span>
+          <button id="disconnectBtn" class="secondary">Disconnect Twitch account</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Not connected -->
+    <div class="view card" id="connectView" hidden>
+      <div class="empty-state">
+        <div class="big">&#128075;</div>
+        <h2>Connect your Twitch account</h2>
+        <p>A one-time Twitch login so we can read your follow list and each channel's VODs. Your login stays in this browser.</p>
+        <button id="connectBtn">Connect Twitch</button>
+        <div id="connectStatus" class="muted small" style="margin-top:10px;"></div>
+      </div>
+    </div>
+
+    <!-- Screen 1: pick channels -->
+    <div class="view card" id="pickerView" hidden>
+      <header>
+        Pick channels to catch up on
+        <span class="sub" id="pickerSub">Loading your follows…</span>
+        <span class="right"><button class="link" id="pickerCancel" hidden>Cancel</button></span>
+      </header>
+      <div class="section picker-tools">
+        <input type="search" id="pickerSearch" placeholder="Search channels" aria-label="Search channels" autocomplete="off" />
+        <span class="links">
+          <button class="link" id="selectAll">Select all</button>
+          <span class="muted">/</span>
+          <button class="link" id="selectNone">Clear</button>
+        </span>
+      </div>
+      <ul id="pickerList" aria-label="Followed channels"></ul>
+      <div class="section picker-foot">
+        <span class="count" id="pickerCount">0 selected</span>
+        <span class="spacer"></span>
+        <button id="pickerNext" disabled>Next</button>
+      </div>
+    </div>
+
+    <!-- Screen 2: inbox -->
+    <div class="view card" id="inboxView" hidden>
+      <div class="chips" role="group" aria-label="Filter">
+        <button class="chip" data-filter="all" aria-pressed="true">All</button>
+        <button class="chip" data-filter="asleep" aria-pressed="false">Missed while asleep <span class="count" id="countAsleep"></span></button>
+        <button class="chip" data-filter="unread" aria-pressed="false">Unread <span class="count" id="countUnread"></span></button>
+      </div>
+      <div class="empty-state" id="inboxEmpty" hidden></div>
+      <ul id="inboxList" aria-label="Channels"></ul>
+    </div>
+
+    <p class="foot">
+      Everything stays in this browser. Not affiliated with Twitch Interactive, Inc.<br />
+      <span id="lastRefreshed"></span>
+    </p>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

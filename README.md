@@ -17,6 +17,15 @@ watched, and jump back into a stream exactly where you left off.
 
 </div>
 
+<div align="center">
+
+![The Catch Up inbox: one row per channel with an avatar, the latest VOD's thumbnail, title, air time, duration and age, a purple unread dot on rows not yet watched, and a Catch up button on each](store/screenshot-1-inbox.png)
+
+<sub><b>The inbox.</b> Newest VOD per channel, a purple dot until you've
+watched it, ticks on the ones you have.</sub>
+
+</div>
+
 ---
 
 ## What it does
@@ -39,6 +48,31 @@ watched, and jump back into a stream exactly where you left off.
 Sibling project of
 [Uptime Badges for Twitch](https://github.com/Brownaye/uptime-badges-for-twitch),
 and built to look like it.
+
+## A look around
+
+<table>
+  <tr>
+    <td width="50%">
+      <img src="store/screenshot-2-expanded.png" alt="A channel row expanded to list every VOD in the window, each with Watch and Mark read buttons">
+      <br><sub><b>Expand a row</b> to see every VOD in the window, each with its own Watch and Mark read.</sub>
+    </td>
+    <td width="50%">
+      <img src="store/screenshot-3-unread-filter.png" alt="The Unread filter selected, showing only channels with unwatched VODs">
+      <br><sub><b>Filters</b> for All, Missed while asleep, and Unread.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%">
+      <img src="store/screenshot-4-picker.png" alt="The channel picker: a searchable list of followed channels with checkboxes and a count of selected channels">
+      <br><sub><b>Pick channels</b> from your follow list. Search, tick, Next.</sub>
+    </td>
+    <td width="50%">
+      <img src="store/screenshot-5-popup.png" alt="The toolbar popup showing the unread count, an Open Catch Up button, and the lookback and sleep hours settings">
+      <br><sub><b>The popup</b> shows your unread count and holds the quick settings.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Settings
 
@@ -68,7 +102,9 @@ to run or modify the source instead, use the developer instructions below.
 > It doesn't auto-update, and Chrome will show a "developer mode extensions"
 > warning on every startup.
 
-1. Download or clone this repository
+1. Download the latest `catch-up-for-twitch-<version>.zip` from
+   [Releases](https://github.com/Brownaye/catch-up-for-twitch/releases) and
+   unzip it, or clone this repository
 2. Open Chrome and go to `chrome://extensions`
 3. Turn on **Developer mode** (top-right toggle)
 4. Click **Load unpacked**
@@ -133,6 +169,7 @@ See **[PRIVACY.md](./PRIVACY.md)** for the full policy.
 | `content.js` | Runs on `twitch.tv/videos/*` to save resume positions and mark VODs watched |
 | `theme.css` | Shared colours, type and controls (matches Uptime Badges) |
 | `icons/` | Extension icons, plus `make-icons.ps1` which generates them |
+| `store/` | Web Store screenshots, promo tiles, listing text and the scripts that build them |
 | `CLAUDE.md` | Architecture notes and project rules for AI-assisted sessions |
 
 ## How it works
@@ -160,25 +197,14 @@ The `key` field in `manifest.json` pins the extension ID so the Twitch OAuth
 redirect URL (`https://<id>.chromiumapp.org/`) is the same whether the
 extension is loaded unpacked or installed from the store.
 
-## Screenshots for the Web Store listing
+## Store assets
 
-Take these at 1280×800 with the browser in dark mode:
-
-1. **Inbox** — several channels with a mix of unread (purple dot) and read
-   rows, one channel showing the LIVE pill, "All" filter selected
-2. **Expanded row** — one channel opened to show its VOD list, with at least
-   one watched VOD (ticked, faded) and one unwatched
-3. **Missed while asleep** — the filter active with its count, and the
-   settings panel open so the sleep hours are visible
-4. **Channel picker** — the follow list with a search term typed and a few
-   channels ticked, count visible at the bottom
-5. **Toolbar popup** — unread count, Open Catch Up button and the quick
-   settings
-6. **Toolbar badge** — a tight crop of the extension icon with a purple
-   unread count on it, next to the Uptime Badges icon if installed
-
-Plus a 440×280 small promo tile: the icon on the purple gradient with the
-tagline "Never miss a stream again."
+Everything for the Chrome Web Store listing lives in `store/`: the five
+1280×800 screenshots, the 440×280 and 1400×560 promo tiles, and the listing
+text with the permission justifications. Two PowerShell scripts rebuild the
+images with no extra tooling: `make-promo.ps1` draws the tiles, and
+`stitch-screenshot.ps1` / `fit-screenshot.ps1` turn any browser capture into
+a 1280×800 24-bit PNG.
 
 ---
 

@@ -26,10 +26,11 @@ matched pair.
   `Intl.RelativeTimeFormat`. Never assume AEST or any fixed offset.
 - **Accessible.** Real `<button>`s, keyboard-navigable rows (Enter/Space to
   expand, arrow keys to move), visible `:focus-visible` outlines.
-- **Do not change the `key` field in `manifest.json`.** It pins the
-  extension ID to `hpehimbcjnfjagfgjfjijcdcgappobmh`, which is the OAuth
-  redirect URL registered in the Twitch app. The private key lives outside
-  the repo at `~/.catchup-keys/`.
+- **Do not change the `key` field in `manifest.json`.** It is the Chrome
+  Web Store's public key for this item, so load-unpacked and store installs
+  share the extension ID `cmlhgkcghkodgadoibcgfkmkjkjcnagm`, which is the
+  OAuth redirect URL registered in the Twitch app. The private half is held
+  by the Web Store; there is no local .pem to manage.
 
 ## Architecture
 

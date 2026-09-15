@@ -128,19 +128,22 @@ function plural(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
-const EXPIRY_SOON_MS = 48 * 3600 * 1000;
+const EXPIRY_URGENT_MS = 48 * 3600 * 1000;      // red
+const EXPIRY_SOON_MS = 7 * 24 * 3600 * 1000;    // amber
 const EXPIRY_TITLE = "Estimated from Twitch's storage policy: 7 days for most channels, 14 for affiliates, 60 for partners.";
 
-// { text, soon } for a VOD's estimated deletion, or null when unknown.
+// { text, level } for a VOD's estimated deletion, or null when unknown.
+// level: ok | soon | urgent | gone (drives the pill colour).
 function expiryInfo(vod) {
-  if (vod.gone) return { text: "Expired", soon: true, gone: true };
+  if (vod.gone) return { text: "Expired", level: "gone" };
   if (!vod.expiresAt) return null;
   const ms = vod.expiresAt - Date.now();
-  if (ms <= 0) return { text: "Expiring now", soon: true };
+  if (ms <= 0) return { text: "Expiring now", level: "urgent" };
+  const level = ms < EXPIRY_URGENT_MS ? "urgent" : ms < EXPIRY_SOON_MS ? "soon" : "ok";
   const hours = Math.ceil(ms / 3600000);
-  if (hours < 24) return { text: `Expires in ${plural(hours, "hour")}`, soon: true };
+  if (hours < 24) return { text: `Expires in ${plural(hours, "hour")}`, level };
   const days = Math.ceil(ms / 86400000);
-  return { text: `Expires in ${plural(days, "day")}`, soon: ms < EXPIRY_SOON_MS };
+  return { text: `Expires in ${plural(days, "day")}`, level };
 }
 
 function savedCount() {
@@ -838,9 +841,9 @@ function renderVod(vod, ch, showTitleAttr) {
     const sep = document.createElement("span");
     sep.className = "sep";
     const e = document.createElement("span");
-    e.className = "expiry" + (exp.soon ? " soon" : "");
+    e.className = `expiry ${exp.level}`;
     e.textContent = exp.text;
-    e.title = exp.gone ? "Twitch no longer has this VOD." : EXPIRY_TITLE;
+    e.title = exp.level === "gone" ? "Twitch no longer has this VOD." : EXPIRY_TITLE;
     line1.append(sep, e);
   }
 

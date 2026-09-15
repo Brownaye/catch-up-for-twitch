@@ -28,8 +28,14 @@ function send(message) {
   });
 }
 
-function saveSettings() {
-  chrome.storage.local.set({ settings });
+// Merge into what is stored; the app page edits the same object.
+function saveSettings(patch) {
+  chrome.storage.local.get("settings", (data) => {
+    settings = { ...DEFAULT_SETTINGS, ...(data.settings || {}), ...patch };
+    chrome.storage.local.set({ settings }, () => {
+      if (chrome.runtime.lastError) setStatus("Couldn't save settings: " + chrome.runtime.lastError.message, "err");
+    });
+  });
 }
 
 function renderSettings() {
@@ -98,15 +104,13 @@ els.lookbackDays.addEventListener("change", () => {
   if (!Number.isFinite(n)) n = DEFAULT_SETTINGS.lookbackDays;
   n = Math.min(60, Math.max(1, n));
   els.lookbackDays.value = n;
-  settings.lookbackDays = n;
-  saveSettings();
+  saveSettings({ lookbackDays: n });
   send({ type: "GET_STATUS" }).then(renderConnection);
 });
 for (const [el, key] of [[els.sleepStart, "sleepStart"], [els.sleepEnd, "sleepEnd"]]) {
   el.addEventListener("change", () => {
     if (!el.value) el.value = DEFAULT_SETTINGS[key];
-    settings[key] = el.value;
-    saveSettings();
+    saveSettings({ [key]: el.value });
   });
 }
 
@@ -117,9 +121,13 @@ els.openBtn.addEventListener("click", () => {
 });
 
 /* connection handlers */
-document.getElementById("connectBtn").addEventListener("click", async () => {
+document.getElementById("connectBtn").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  if (btn.disabled) return;
+  btn.disabled = true;
   setStatus("Opening Twitch login...");
   const res = await send({ type: "LOGIN" });
+  btn.disabled = false;
   if (res.ok) {
     const status = await send({ type: "GET_STATUS" });
     await renderConnection(status);

@@ -72,7 +72,20 @@ function getStored(keys) {
 }
 
 function setStored(obj) {
-  return new Promise((resolve) => chrome.storage.local.set(obj, resolve));
+  return new Promise((resolve, reject) =>
+    chrome.storage.local.set(obj, () => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(Object.assign(new Error(err.message || "Storage write failed."), { code: "storage" }));
+      else resolve();
+    })
+  );
+}
+
+function describeError(code) {
+  if (code === "storage") return "Chrome refused to save extension data (storage may be full)";
+  if (code === "network") return "no network";
+  if (code === "http") return "Twitch returned an error";
+  return code || "unknown error";
 }
 
 /* ---------- formatting (always the user's local timezone) ---------- */
@@ -250,6 +263,15 @@ function showReconnectBanner() {
   showBanner("Your Twitch login expired.", "Reconnect", () => connect(els.bannerAction));
 }
 
+// The worker says there is no usable login even though the page thought
+// there was. Land on the connect view rather than looping through boot().
+function showDisconnected() {
+  state.inbox = null;
+  setUnreadPill(0);
+  showView("connect");
+  showBanner("Not connected to Twitch. Connect to load your channels.", "", null, "warn");
+}
+
 /* ---------- settings ---------- */
 
 async function loadSettings() {
@@ -260,8 +282,16 @@ async function loadSettings() {
   els.sleepEnd.value = state.settings.sleepEnd;
 }
 
-function saveSettings() {
-  return setStored({ settings: state.settings });
+// Merge into what is stored rather than overwriting, since the popup edits
+// the same object and may have changed a field this page has not seen.
+async function saveSettings(patch) {
+  const { settings } = await getStored(["settings"]);
+  state.settings = { ...DEFAULT_SETTINGS, ...(settings || {}), ...patch };
+  try {
+    await setStored({ settings: state.settings });
+  } catch (err) {
+    showBanner("Couldn't save settings: " + describeError(err.code) + ".", "", null);
+  }
 }
 
 els.lookbackDays.addEventListener("change", async () => {
@@ -269,8 +299,7 @@ els.lookbackDays.addEventListener("change", async () => {
   if (!Number.isFinite(n)) n = DEFAULT_SETTINGS.lookbackDays;
   n = Math.min(60, Math.max(1, n));
   els.lookbackDays.value = n;
-  state.settings.lookbackDays = n;
-  await saveSettings();
+  await saveSettings({ lookbackDays: n });
   loadInbox(false); // cache already holds up to 100 VODs; the worker just refilters
 });
 
@@ -279,8 +308,7 @@ for (const [el, key] of [[els.sleepStart, "sleepStart"], [els.sleepEnd, "sleepEn
     if (!el.value) {
       el.value = DEFAULT_SETTINGS[key];
     }
-    state.settings[key] = el.value;
-    await saveSettings();
+    await saveSettings({ [key]: el.value });
     renderInbox();
   });
 }
@@ -328,8 +356,8 @@ async function openPicker(cancelable) {
     const res = await send({ type: "GET_FOLLOWED" });
     if (!res.ok) {
       if (res.error === "unauthorized") showReconnectBanner();
-      else if (res.error === "not_connected") return boot();
-      else showBanner("Couldn't load your follow list (" + res.error + ").", "Retry", () => openPicker(cancelable));
+      else if (res.error === "not_connected") return showDisconnected();
+      else showBanner("Couldn't load your follow list (" + describeError(res.error) + ").", "Retry", () => openPicker(cancelable));
       els.pickerSub.textContent = "Couldn't load follows.";
       return;
     }
@@ -456,9 +484,11 @@ async function loadInbox(force) {
     if (res.error === "unauthorized") {
       showReconnectBanner();
     } else if (res.error === "not_connected") {
-      return boot();
+      return showDisconnected();
+    } else if (res.error === "storage") {
+      showBanner("Couldn't save the refreshed VODs: " + describeError(res.error) + ".", "Retry", () => loadInbox(true));
     } else {
-      showBanner("Couldn't reach Twitch (" + res.error + "). Showing what was cached.", "Retry", () => loadInbox(true));
+      showBanner("Couldn't reach Twitch (" + describeError(res.error) + "). Showing what was cached.", "Retry", () => loadInbox(true));
     }
     // A partial inbox may still have been returned alongside the error.
     if (Array.isArray(res.channels)) state.inbox = res;
@@ -483,7 +513,12 @@ function channelView(ch) {
 function renderInbox() {
   const inbox = state.inbox;
   if (!inbox) return;
+  const focused = focusKey();
+  renderInboxBody(inbox);
+  restoreFocus(focused);
+}
 
+function renderInboxBody(inbox) {
   const allVods = inbox.channels.flatMap((c) => c.vods);
   const unreadTotal = allVods.filter((v) => !v.watched).length;
   const asleepUnread = allVods.filter((v) => !v.watched && overlapsSleep(v, state.settings)).length;
@@ -536,7 +571,7 @@ function renderInbox() {
       makeButton("Clear", () => {
         state.caughtUpDismissed = true;
         renderInbox();
-      }, "secondary")
+      }, "secondary", "clear")
     );
   } else if (shown === 0 && state.filter === "asleep") {
     els.inboxEmpty.hidden = false;
@@ -583,13 +618,13 @@ function renderSavedView() {
     const controls = document.createElement("div");
     controls.className = "controls";
     if (!vod.gone) {
-      const watch = makeButton(vod.watched ? "Watch again" : "Watch", () => openVod(vod, ch), vod.watched ? "secondary" : "");
+      const watch = makeButton(vod.watched ? "Watch again" : "Watch", () => openVod(vod, ch), vod.watched ? "secondary" : "", `watch:${vod.id}`);
       if (vod.resume > 5 && !vod.watched) watch.title = `Resume from ${formatDuration(vod.resume)}`;
-      const mark = makeButton(vod.watched ? "Mark unread" : "Mark read", () => setWatched([vod.id], !vod.watched), "secondary");
+      const mark = makeButton(vod.watched ? "Mark unread" : "Mark read", () => setWatched([vod.id], !vod.watched), "secondary", `mark:${vod.id}`);
       mark.setAttribute("aria-pressed", String(vod.watched));
       controls.append(watch, mark);
     }
-    controls.appendChild(makeButton("Remove", () => toggleSaved(vod, ch), "secondary"));
+    controls.appendChild(makeButton("Remove", () => toggleSaved(vod, ch), "secondary", `remove:${vod.id}`));
 
     li.append(who, renderVod(vod, ch, true), controls);
     frag.appendChild(li);
@@ -600,8 +635,8 @@ function renderSavedView() {
 const BOOKMARK_SVG =
   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
 
-function saveButton(vod, ch) {
-  const b = makeButton("", () => toggleSaved(vod, ch), "icon save" + (vod.saved ? " on" : ""));
+function saveButton(vod, ch, focus = `save:${vod.id}`) {
+  const b = makeButton("", () => toggleSaved(vod, ch), "icon save" + (vod.saved ? " on" : ""), focus);
   b.innerHTML = BOOKMARK_SVG;
   b.setAttribute("aria-pressed", String(!!vod.saved));
   b.setAttribute("aria-label", vod.saved ? "Remove from saved" : "Save for later");
@@ -648,11 +683,26 @@ function emptyBlock(icon, title, text) {
   return wrap;
 }
 
-function makeButton(label, onClick, cls = "") {
+// Re-rendering rebuilds the list, which would drop keyboard focus. Every
+// interactive element carries a stable data-focus key so it can be found
+// again afterwards.
+function focusKey() {
+  const el = document.activeElement;
+  return el && el.dataset && el.dataset.focus ? el.dataset.focus : null;
+}
+
+function restoreFocus(key) {
+  if (!key) return;
+  const el = els.inboxView.querySelector(`[data-focus="${CSS.escape(key)}"]`);
+  if (el) el.focus({ preventScroll: true });
+}
+
+function makeButton(label, onClick, cls = "", focus = "") {
   const b = document.createElement("button");
   b.type = "button";
   b.textContent = label;
   if (cls) b.className = cls;
+  if (focus) b.dataset.focus = focus;
   b.addEventListener("click", (e) => {
     e.stopPropagation();
     onClick(e);
@@ -668,6 +718,7 @@ function renderChannelRow(ch, view) {
   const row = document.createElement("div");
   row.className = "chan" + (view.unread > 0 ? " has-unread" : "");
   row.tabIndex = 0;
+  row.dataset.focus = `chan:${ch.id}`;
   row.setAttribute("role", "button");
   row.setAttribute("aria-expanded", String(expanded));
   row.setAttribute("aria-label", `${ch.name}, ${plural(view.unread, "unread VOD")}`);
@@ -726,12 +777,12 @@ function renderChannelRow(ch, view) {
   const controls = document.createElement("div");
   controls.className = "controls";
   if (view.primary) {
-    const btn = makeButton(view.primary.watched ? "Watch again" : "Catch up", () => openVod(view.primary, ch), view.primary.watched ? "secondary" : "");
+    const btn = makeButton(view.primary.watched ? "Watch again" : "Catch up", () => openVod(view.primary, ch), view.primary.watched ? "secondary" : "", `catchup:${ch.id}`);
     if (view.primary.resume > 5 && !view.primary.watched) btn.title = `Resume from ${formatDuration(view.primary.resume)}`;
     controls.appendChild(btn);
-    controls.appendChild(saveButton(view.primary, ch));
+    controls.appendChild(saveButton(view.primary, ch, `save-row:${ch.id}`));
   }
-  const chev = makeButton("", () => toggleExpanded(ch.id), "icon chev");
+  const chev = makeButton("", () => toggleExpanded(ch.id), "icon chev", `chev:${ch.id}`);
   chev.setAttribute("aria-label", expanded ? "Collapse" : `Show all VODs for ${ch.name}`);
   chev.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
   controls.appendChild(chev);
@@ -870,9 +921,9 @@ function renderVodList(ch, view) {
     li.appendChild(renderVod(vod, ch, true));
     const controls = document.createElement("div");
     controls.className = "controls";
-    const watch = makeButton("Watch", () => openVod(vod, ch), vod.watched ? "secondary" : "");
+    const watch = makeButton("Watch", () => openVod(vod, ch), vod.watched ? "secondary" : "", `watch:${vod.id}`);
     if (vod.resume > 5 && !vod.watched) watch.title = `Resume from ${formatDuration(vod.resume)}`;
-    const mark = makeButton(vod.watched ? "Mark unread" : "Mark read", () => setWatched([vod.id], !vod.watched), "secondary");
+    const mark = makeButton(vod.watched ? "Mark unread" : "Mark read", () => setWatched([vod.id], !vod.watched), "secondary", `mark:${vod.id}`);
     mark.setAttribute("aria-pressed", String(vod.watched));
     controls.append(watch, mark, saveButton(vod, ch));
     li.appendChild(controls);
@@ -886,7 +937,7 @@ function toggleExpanded(id) {
   else state.expanded.add(id);
   renderInbox();
   const row = els.inboxList.querySelector(`li[data-id="${CSS.escape(id)}"] .chan`);
-  if (row) row.focus();
+  if (row) row.focus({ preventScroll: true });
 }
 
 async function openVod(vod, ch) {
@@ -947,14 +998,35 @@ chrome.storage.onChanged.addListener((changes, area) => {
     renderInbox();
   }
   if (changes.resume) {
+    // Fires every 15 s while a VOD plays; only redraw when a shown value moved.
     const resume = changes.resume.newValue || {};
-    for (const ch of state.inbox.channels) {
-      for (const v of ch.vods) v.resume = resume[v.id] ? resume[v.id].seconds || 0 : 0;
-    }
-    for (const v of state.inbox.saved || []) v.resume = resume[v.id] ? resume[v.id].seconds || 0 : 0;
-    renderInbox();
+    let visibleChange = false;
+    const apply = (v) => {
+      const next = resume[v.id] ? resume[v.id].seconds || 0 : 0;
+      if (next !== v.resume) {
+        v.resume = next;
+        if (!v.watched) visibleChange = true;
+      }
+    };
+    for (const ch of state.inbox.channels) ch.vods.forEach(apply);
+    (state.inbox.saved || []).forEach(apply);
+    if (visibleChange) renderInbox();
   }
   if (changes.authExpired && changes.authExpired.newValue) showReconnectBanner();
+});
+
+// Settings edited in the popup while this page is open.
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.settings) return;
+  const next = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue || {}) };
+  const lookbackChanged = next.lookbackDays !== state.settings.lookbackDays;
+  state.settings = next;
+  els.lookbackDays.value = next.lookbackDays;
+  els.sleepStart.value = next.sleepStart;
+  els.sleepEnd.value = next.sleepEnd;
+  if (!state.inbox) return;
+  if (lookbackChanged) loadInbox(false);
+  else renderInbox();
 });
 
 /* ---------- boot ---------- */

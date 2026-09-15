@@ -42,8 +42,16 @@ function getStored(keys) {
   return new Promise((resolve) => chrome.storage.local.get(keys, resolve));
 }
 
+// Rejects with code "storage" when Chrome refuses the write (quota, shutdown),
+// so callers surface it instead of silently carrying on with stale data.
 function setStored(obj) {
-  return new Promise((resolve) => chrome.storage.local.set(obj, resolve));
+  return new Promise((resolve, reject) =>
+    chrome.storage.local.set(obj, () => {
+      const err = chrome.runtime.lastError;
+      if (err) reject(Object.assign(new Error(err.message || "Storage write failed."), { code: "storage" }));
+      else resolve();
+    })
+  );
 }
 
 async function getSettings() {
@@ -79,13 +87,22 @@ async function renderBadge(unread) {
 // Run the implicit grant flow. Non-interactive succeeds only while the
 // user's twitch.tv session cookie is still valid, which lets us renew an
 // expired token without any UI.
+function randomState() {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 async function authorize(interactive) {
+  // `state` ties the response to this request (Twitch recommends it).
+  const state = randomState();
   const authUrl =
     "https://id.twitch.tv/oauth2/authorize" +
     `?client_id=${encodeURIComponent(CLIENT_ID)}` +
     `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
     "&response_type=token" +
     "&scope=user:read:follows" +
+    `&state=${encodeURIComponent(state)}` +
     (interactive ? "&force_verify=true" : "");
 
   const redirectResponse = await chrome.identity.launchWebAuthFlow({
@@ -93,28 +110,36 @@ async function authorize(interactive) {
     interactive,
   });
 
-  const params = new URLSearchParams(new URL(redirectResponse).hash.substring(1));
+  // Success lands in the fragment; a refusal comes back in the query string.
+  const redirected = new URL(redirectResponse);
+  const params = new URLSearchParams(redirected.hash.substring(1));
+  const query = redirected.searchParams;
+  const error = params.get("error") || query.get("error");
+  if (error) {
+    throw new Error(params.get("error_description") || query.get("error_description") || error);
+  }
+  if ((params.get("state") || query.get("state")) !== state) {
+    throw new Error("Login response did not match this request.");
+  }
   const accessToken = params.get("access_token");
   if (!accessToken) throw new Error("Twitch did not return an access token.");
+
+  // Who am I? Needed for /channels/followed. Nothing is stored until this
+  // succeeds, so a failed login can never leave a half-connected state.
+  const me = await helixGet("/users", [], accessToken);
+  const user = (me.data || [])[0];
+  if (!user) throw new Error("Twitch did not return your account.");
 
   await setStored({
     accessToken,
     connected: true,
     authExpired: false,
     authBannerDismissed: false,
+    userId: user.id,
+    userLogin: user.login,
+    userName: user.display_name,
+    userAvatar: user.profile_image_url,
   });
-
-  // Who am I? Needed for /channels/followed.
-  const me = await helixGet("/users", [], accessToken);
-  const user = (me.data || [])[0];
-  if (user) {
-    await setStored({
-      userId: user.id,
-      userLogin: user.login,
-      userName: user.display_name,
-      userAvatar: user.profile_image_url,
-    });
-  }
 
   await refreshBadgeFromCache();
   return accessToken;
@@ -124,14 +149,39 @@ function login() {
   return authorize(true);
 }
 
+// Revoke the token server-side (best effort) and forget the account and the
+// cached Twitch data. Selected channels, watched marks, resume positions
+// and the saved list are the user's own curation and are kept.
 async function logout() {
+  const { accessToken } = await getStored(["accessToken"]);
+  if (accessToken) {
+    try {
+      await fetch("https://id.twitch.tv/oauth2/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `client_id=${encodeURIComponent(CLIENT_ID)}&token=${encodeURIComponent(accessToken)}`,
+      });
+    } catch {
+      // Offline or Twitch down; the token still expires on its own.
+    }
+  }
   await setStored({
     accessToken: null,
     connected: false,
     authExpired: false,
     authBannerDismissed: false,
+    userId: null,
+    userLogin: null,
+    userName: null,
+    userAvatar: null,
+    cache: { users: {}, vods: {}, live: { fetchedAt: 0, byId: {} } },
   });
   chrome.action.setBadgeText({ text: "" });
+}
+
+async function markAuthExpired() {
+  await setStored({ accessToken: null, connected: false, authExpired: true });
+  await renderBadge(0);
 }
 
 // Token came back 401: try a silent renewal first, and only surface the
@@ -143,8 +193,7 @@ function handleExpiredToken() {
       try {
         return await authorize(false);
       } catch {
-        await setStored({ accessToken: null, connected: false, authExpired: true });
-        await renderBadge(0);
+        await markAuthExpired();
         return null;
       } finally {
         renewInFlight = null;
@@ -197,7 +246,10 @@ async function helixGet(path, query = [], tokenOverride = null) {
     if (!accessToken) throw new HelixError("unauthorized", "Twitch login expired.", 401);
     resp = await doFetch(accessToken);
   }
-  if (resp.status === 401) throw new HelixError("unauthorized", "Twitch login expired.", 401);
+  if (resp.status === 401) {
+    if (!tokenOverride) await markAuthExpired();
+    throw new HelixError("unauthorized", "Twitch login expired.", 401);
+  }
 
   if (resp.status === 429) {
     const reset = Number(resp.headers.get("Ratelimit-Reset")) * 1000;
@@ -311,7 +363,7 @@ async function ensureUsers(cache, ids, force = false) {
     for (const id of batch) {
       if (!got.has(id)) {
         const prev = cache.users[id] || { id };
-        cache.users[id] = { ...prev, missing: true, fetchedAt: now };
+        cache.users[id] = { ...prev, type: prev.type || "", missing: true, fetchedAt: now };
       }
     }
   }
@@ -357,6 +409,7 @@ async function fetchChannelVods(cache, channelId, force) {
     const items = (json.data || []).map(normalizeVod);
     items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
     cache.vods[channelId] = { fetchedAt: now, items, everHadVods: items.length > 0 };
+    cache.refreshedAt = now;
   } catch (err) {
     if (err.code === "unauthorized" || err.code === "not_connected") throw err;
     // Helix answers 404/400 for a deleted or banned broadcaster; treat as "no VODs".
@@ -393,9 +446,11 @@ async function fetchLive(cache, ids, force) {
       }
     }
     cache.live = { fetchedAt: now, byId };
+    cache.refreshedAt = now;
   } catch (err) {
     if (err.code === "unauthorized" || err.code === "not_connected") throw err;
-    cache.live = { ...cache.live, error: err.code || "error" };
+    // Keep the last known live set but make the next call retry immediately.
+    cache.live = { ...cache.live, fetchedAt: 0, error: err.code || "error" };
   }
   return cache.live;
 }
@@ -467,8 +522,9 @@ async function verifySaved(cache, force) {
   if (!force && now - (cache.savedCheckedAt || 0) < CACHE_TTL) return 0;
 
   let errors = 0;
+  const found = new Map();   // id -> fresh normalized VOD
+  const checked = new Set(); // ids whose batch completed (found or confirmed gone)
   for (const batch of chunk(ids, 100)) {
-    const found = new Map();
     try {
       const json = await helixGet("/videos", batch.map((id) => ["id", id]));
       for (const v of json.data || []) found.set(v.id, normalizeVod(v));
@@ -479,19 +535,26 @@ async function verifySaved(cache, force) {
         continue; // leave this batch as it was
       }
     }
-    for (const id of batch) {
-      const entry = saved[id];
-      const fresh = found.get(id);
-      if (fresh) {
-        entry.vod = { ...entry.vod, ...fresh };
-        delete entry.gone;
-      } else if (!entry.gone) {
-        entry.gone = now;
-      }
+    for (const id of batch) checked.add(id);
+  }
+
+  // The user may have saved or removed VODs while we were waiting on the
+  // network, so apply the results to the current list rather than the
+  // snapshot we started from.
+  const current = await loadSaved();
+  for (const id of checked) {
+    const entry = current[id];
+    if (!entry) continue;
+    const fresh = found.get(id);
+    if (fresh) {
+      entry.vod = { ...entry.vod, ...fresh };
+      delete entry.gone;
+    } else if (!entry.gone) {
+      entry.gone = now;
     }
   }
   cache.savedCheckedAt = now;
-  await setStored({ saved });
+  await setStored({ saved: current });
   return errors;
 }
 
@@ -545,12 +608,13 @@ function buildInbox(cache, selected, settings, watched, resume, saved) {
     .filter((e) => e && e.vod && e.vod.id)
     .map((e) => {
       const user = cache.users[e.channelId] || {};
+      const snap = e.channel || {};
       const channel = {
         id: e.channelId,
-        login: user.login || e.channel.login || "",
-        name: user.name || e.channel.name || e.channel.login || `Channel ${e.channelId}`,
-        avatar: user.avatar || e.channel.avatar || "",
-        type: user.type !== undefined ? user.type : e.channel.type || "",
+        login: user.login || snap.login || "",
+        name: user.name || snap.name || snap.login || `Channel ${e.channelId}`,
+        avatar: user.avatar || snap.avatar || "",
+        type: user.type !== undefined ? user.type : snap.type || "",
       };
       // Prefer the live cache entry for a channel that is still ticked.
       const cached = cache.vods[e.channelId] && cache.vods[e.channelId].items.find((v) => v.id === e.vod.id);
@@ -568,7 +632,7 @@ function buildInbox(cache, selected, settings, watched, resume, saved) {
     });
   savedList.sort((a, b) => (a.gone ? 1 : 0) - (b.gone ? 1 : 0) || a.expiresAt - b.expiresAt);
 
-  return { channels, unread, saved: savedList, fetchedAt: cache.live.fetchedAt || 0 };
+  return { channels, unread, saved: savedList, fetchedAt: cache.refreshedAt || cache.live.fetchedAt || 0 };
 }
 
 // Refresh (respecting the 5-minute cache unless `force`) and return the
@@ -618,14 +682,15 @@ async function refreshInbox(force) {
     }
 
     if (!authError) {
-      try {
-        await mapPool(selected, VOD_CONCURRENCY, async (id) => {
+      await mapPool(selected, VOD_CONCURRENCY, async (id) => {
+        if (authError) return;
+        try {
           const entry = await fetchChannelVods(cache, id, force);
           if (entry.error) errors++;
-        });
-      } catch (err) {
-        authError = err;
-      }
+        } catch (err) {
+          authError = authError || err;
+        }
+      });
     }
   }
 
@@ -711,7 +776,16 @@ async function pruneOld() {
   for (const [id, e] of Object.entries(saved)) {
     if (!e || !e.vod || (e.gone && e.gone < goneCutoff)) delete saved[id];
   }
-  await setStored({ watched: w, resume: r, saved });
+  await setStored({ watched: w, resume: capResume(r), saved, prunedAt: Date.now() });
+}
+
+// Keep only the most recently updated resume positions.
+const RESUME_MAX = 500;
+function capResume(resume) {
+  const entries = Object.entries(resume);
+  if (entries.length <= RESUME_MAX) return resume;
+  entries.sort((a, b) => (b[1].updatedAt || 0) - (a[1].updatedAt || 0));
+  return Object.fromEntries(entries.slice(0, RESUME_MAX));
 }
 
 /* ---------- opening a VOD ---------- */
@@ -746,7 +820,12 @@ function ensureAlarm() {
 }
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === REFRESH_ALARM) getInbox(false).catch(() => {});
+  if (alarm.name !== REFRESH_ALARM) return;
+  getInbox(false).catch(() => {});
+  // Long-running profiles never restart, so prune from here too (daily).
+  getStored(["prunedAt"]).then(({ prunedAt }) => {
+    if (Date.now() - (prunedAt || 0) > 24 * 60 * 60 * 1000) pruneOld().catch(() => {});
+  });
 });
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -786,6 +865,7 @@ function reply(promise, sendResponse) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message || typeof message.type !== "string") return false;
   switch (message.type) {
     case "LOGIN":
       return reply(login().then(() => ({ ok: true })), sendResponse);
@@ -795,10 +875,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case "GET_STATUS":
       return reply(
-        getStored(["connected", "authExpired", "userId", "userLogin", "userName", "userAvatar", "selectedChannels"]).then(
+        getStored(["connected", "accessToken", "authExpired", "userId", "userLogin", "userName", "userAvatar", "selectedChannels"]).then(
           (data) => ({
             ok: true,
-            connected: !!data.connected,
+            connected: !!(data.connected && data.accessToken && data.userId),
             authExpired: !!data.authExpired,
             userId: data.userId || null,
             userLogin: data.userLogin || null,
@@ -819,7 +899,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           try {
             await ensureUsers(cache, follows.map((f) => f.id), !!message.force);
           } finally {
-            await saveCache(cache);
+            // A refresh may have written VODs meanwhile; only merge our users in.
+            const current = await loadCache();
+            current.users = { ...current.users, ...cache.users };
+            await saveCache(current);
           }
           const channels = follows.map((f) => {
             const u = cache.users[f.id] || {};

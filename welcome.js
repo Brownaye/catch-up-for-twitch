@@ -1,6 +1,7 @@
 const btn = document.getElementById("connectBtn");
 const done = document.getElementById("done");
 const openApp = document.getElementById("openApp");
+const status = document.getElementById("connectStatus");
 
 chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
   if (res && res.connected) {
@@ -11,6 +12,8 @@ chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
 });
 
 btn.addEventListener("click", () => {
+  if (btn.disabled) return;
+  status.textContent = "";
   btn.disabled = true;
   btn.textContent = "Opening Twitch login...";
   chrome.runtime.sendMessage({ type: "LOGIN" }, (res) => {
@@ -20,7 +23,7 @@ btn.addEventListener("click", () => {
     } else {
       btn.disabled = false;
       btn.textContent = "Connect Twitch";
-      alert("Couldn't connect: " + (res?.error || "unknown error") + "\nPlease try again.");
+      status.textContent = "Couldn't connect: " + (res && res.error ? res.error : "unknown error") + ". Please try again.";
     }
   });
 });

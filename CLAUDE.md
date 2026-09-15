@@ -40,7 +40,7 @@ app.html/js     one page, two views: #pickerView (screen 1) and #inboxView (scre
                 the Saved chip swaps #inboxList into a flat list (class .savedlist)
 popup.html/js   320px launcher + quick settings
 welcome.html/js first-run page (opened on install)
-content.js      on twitch.tv/videos/*: saves resume position every 15s, marks watched at 90%
+content.js      on all of www.twitch.tv (SPA), acts only on /videos/<id>: saves resume every 15s, marks watched at 90%
 theme.css       shared variables + primitives
 icons/          PNGs + make-icons.ps1 (System.Drawing, no dependencies)
 ```
@@ -57,8 +57,13 @@ first, expired last).
 ### Twitch details worth remembering
 
 - OAuth is the implicit grant through `chrome.identity.launchWebAuthFlow`,
-  scope `user:read:follows` only. Client ID is registered as
-  "Catch Up VOD Inbox" (Twitch rejects app names containing "Twitch").
+  scope `user:read:follows` only, with a random `state` that is checked on
+  return. Nothing is written to storage until `/users` succeeds, so a login
+  can never leave `connected` without a `userId` (which used to loop the
+  app page). Disconnect POSTs `id.twitch.tv/oauth2/revoke` (best effort) and
+  clears the account + `cache`, keeping the user's own selections. Client ID
+  is registered as "Catch Up VOD Inbox" (Twitch rejects app names
+  containing "Twitch").
 - On 401: try a silent (non-interactive) re-auth once; if that fails set
   `authExpired`, show a red "!" badge and a Reconnect banner.
 - `/videos` returns **no game/category**. The UI only shows a game when the
@@ -98,8 +103,22 @@ cache:    { users: { [id]: {id, login, name, avatar, fetchedAt, missing?} },
 ```
 
 Cache TTLs: VODs and live 5 minutes, users 24 hours. `watched` and `resume`
-entries older than 90 days are pruned on install/startup; `saved` entries
-that have been `gone` for 30 days are dropped too.
+entries older than 90 days are pruned on install/startup and daily from the
+alarm (`prunedAt`); `saved` entries that have been `gone` for 30 days are
+dropped too; `resume` is capped at 500 entries (worker and content script).
+`cache.refreshedAt` is the last time any Twitch data actually landed and is
+what "Last refreshed" shows.
+
+### Concurrency rules
+
+`chrome.storage.local` writes are whole-object read-modify-write with no
+lock, so: `setStored()` rejects with code `storage` (never ignore it);
+`verifySaved()` re-reads `saved` after its network calls and applies results
+to the current list; `GET_FOLLOWED` merges only `users` into the current
+cache; pages merge `settings` patches into what is stored rather than
+writing their own copy, and the app page follows `settings` changes made in
+the popup. The app page keeps keyboard focus across re-renders via
+`data-focus` keys (`chan:<id>`, `catchup:<chId>`, `save:<vodId>`, ...).
 
 ## Releasing
 

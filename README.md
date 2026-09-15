@@ -40,7 +40,12 @@ watched it, ticks on the ones you have.</sub>
   **Mark read** buttons
 - A red **LIVE** pill when the channel is streaming right now
 - Filters: **All**, **Missed while asleep** (streams that overlapped your
-  sleep hours), and **Unread**
+  sleep hours), **Unread**, and **Saved**
+- **Save for later**: hit the bookmark on any VOD to keep it in the Saved
+  tab, even after it drops out of the window or you untick the channel
+- Every VOD shows when Twitch will delete it (7, 14 or 60 days depending on
+  the channel), turning amber inside the last two days; the Saved tab sorts
+  soonest-to-expire first and labels anything already gone
 - Toolbar badge shows the unread count and refreshes every 30 minutes
 - Channels with VODs turned off, or that no longer exist, are labelled rather
   than silently dropped

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtHsfQ22ixaxN/ioeD4UvZ7vaYbdJIXLPlYwP96SV1FWLHPZITU1njCNhLhXJsNME9r7pFD5roDBwQb4CPgwUovGyre3EpANC5ta/xwh+EqgovZnTro4P78rjj9TfzO7O758vbArToIPf6t70Tedpjg8uENZLeCyRPsoZUVjRgsdnrflweIg9mX4m7TlfmmV0hyBHTGvRRPJEZER4nl1qggRUP4IHNMHbgnLoG443N+6Xe7zuRZp34Wwy2PCAIBf7L0MrnLTmcaypaP7mErzleoSZWY45NYPEkDQ9a7lZ7wVEgQg2L2FhqKyY4Yu6CJRBV2MZE8iMakn24flRXgrtNQIDAQAB",
   "name": "Catch Up for Twitch",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "An inbox of the streams you missed. Pick your channels, see their recent VODs, and jump straight back in where you left off.",
   "permissions": [
     "identity",

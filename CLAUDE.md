@@ -36,7 +36,8 @@ matched pair.
 
 ```
 background.js   service worker: OAuth, helixGet(), cache, alarm, badge, messages
-app.html/js     one page, two views: #pickerView (screen 1) and #inboxView (screen 2)
+app.html/js     one page, two views: #pickerView (screen 1) and #inboxView (screen 2);
+                the Saved chip swaps #inboxList into a flat list (class .savedlist)
 popup.html/js   320px launcher + quick settings
 welcome.html/js first-run page (opened on install)
 content.js      on twitch.tv/videos/*: saves resume position every 15s, marks watched at 90%
@@ -47,9 +48,11 @@ icons/          PNGs + make-icons.ps1 (System.Drawing, no dependencies)
 Pages never call Twitch directly. They send messages to the worker
 (`LOGIN`, `LOGOUT`, `GET_STATUS`, `GET_FOLLOWED`, `SET_SELECTED`,
 `GET_INBOX {force}`, `GET_UNREAD`, `MARK_WATCHED`, `MARK_ALL_READ`,
-`OPEN_VOD`, `OPEN_APP`) and read/write `chrome.storage.local` for settings.
+`SET_SAVED {id, saved, vod, channel}`, `OPEN_VOD`, `OPEN_APP`) and read/write `chrome.storage.local` for settings.
 The worker's `buildInbox()` is a pure function of (cache, selected channels,
-settings, watched, resume) so the badge and the page always agree.
+settings, watched, resume, saved) so the badge and the page always agree. It
+returns `channels` (grouped inbox) and `saved` (flat list, soonest to expire
+first, expired last).
 
 ### Twitch details worth remembering
 
@@ -68,6 +71,15 @@ settings, watched, resume) so the badge and the page always agree.
 - Duration strings look like `4h12m33s`, `47m2s`, `58s`.
 - Deleted/banned channels: `/users` omits them (recorded as `missing`),
   `/videos` may 404 (recorded as `unavailable`).
+- **VOD expiry is an estimate**: `created_at` + 7 days (regular), 14
+  (affiliate) or 60 (partner) from `/users` `broadcaster_type`, stored as
+  `type` on the user cache entry. Prime/Turbo channels also get 60 days but
+  Helix cannot tell us, so "" is treated as a 7-day floor. User cache entries
+  without `type` are refetched.
+- `/videos?id=a&id=b` (100 max) silently drops ids it cannot find and 404s
+  when none exist; `verifySaved()` uses that to stamp `gone` on saved VODs.
+  It runs on every inbox refresh, gated by `cache.savedCheckedAt` + the
+  5-minute TTL.
 
 ## Storage schema (`chrome.storage.local`)
 
@@ -78,13 +90,16 @@ selectedChannels: string[]                                 // broadcaster IDs
 settings: { lookbackDays: 7, sleepStart: "23:00", sleepEnd: "08:00" }
 watched:  { [vodId]: msTimestamp }        // truthy = watched; timestamp enables 90-day pruning
 resume:   { [vodId]: { seconds, updatedAt } }
+saved:    { [vodId]: { savedAt, channelId, vod: <normalizeVod()>,      // "Save for later"; snapshot so it
+                       channel: { login, name, avatar, type }, gone? } } // outlives the window / untick
 cache:    { users: { [id]: {id, login, name, avatar, fetchedAt, missing?} },
             vods:  { [channelId]: { fetchedAt, items, everHadVods, error?, unavailable? } },
             live:  { fetchedAt, byId: { [channelId]: { startedAt, title, game, viewers, login } } } }
 ```
 
 Cache TTLs: VODs and live 5 minutes, users 24 hours. `watched` and `resume`
-entries older than 90 days are pruned on install/startup.
+entries older than 90 days are pruned on install/startup; `saved` entries
+that have been `gone` for 30 days are dropped too.
 
 ## Releasing
 

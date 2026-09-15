@@ -40,6 +40,7 @@ const els = {
   inboxEmpty: $("inboxEmpty"),
   countAsleep: $("countAsleep"),
   countUnread: $("countUnread"),
+  countSaved: $("countSaved"),
   lastRefreshed: $("lastRefreshed"),
 };
 
@@ -49,7 +50,7 @@ const state = {
   followed: [],           // picker: [{ id, login, name, avatar }]
   picked: new Set(),      // picker: ticked ids
   inbox: null,            // GET_INBOX result
-  filter: "all",          // all | asleep | unread
+  filter: "all",          // all | asleep | unread | saved
   expanded: new Set(),    // channel ids with the VOD list open
   caughtUpDismissed: false, // "You're caught up" block hidden via its Clear button until something new arrives
   loading: false,
@@ -125,6 +126,25 @@ function formatAge(iso) {
 
 function plural(n, word) {
   return `${n} ${word}${n === 1 ? "" : "s"}`;
+}
+
+const EXPIRY_SOON_MS = 48 * 3600 * 1000;
+const EXPIRY_TITLE = "Estimated from Twitch's storage policy: 7 days for most channels, 14 for affiliates, 60 for partners.";
+
+// { text, soon } for a VOD's estimated deletion, or null when unknown.
+function expiryInfo(vod) {
+  if (vod.gone) return { text: "Expired", soon: true, gone: true };
+  if (!vod.expiresAt) return null;
+  const ms = vod.expiresAt - Date.now();
+  if (ms <= 0) return { text: "Expiring now", soon: true };
+  const hours = Math.ceil(ms / 3600000);
+  if (hours < 24) return { text: `Expires in ${plural(hours, "hour")}`, soon: true };
+  const days = Math.ceil(ms / 86400000);
+  return { text: `Expires in ${plural(days, "day")}`, soon: ms < EXPIRY_SOON_MS };
+}
+
+function savedCount() {
+  return state.inbox && Array.isArray(state.inbox.saved) ? state.inbox.saved.length : 0;
 }
 
 /* ---------- "missed while asleep" ---------- */
@@ -468,6 +488,7 @@ function renderInbox() {
   if (unreadTotal > 0) state.caughtUpDismissed = false;
   els.countUnread.textContent = unreadTotal ? `(${unreadTotal})` : "";
   els.countAsleep.textContent = asleepUnread ? `(${asleepUnread})` : "";
+  els.countSaved.textContent = savedCount() ? `(${savedCount()})` : "";
   els.markAllBtn.disabled = unreadTotal === 0;
 
   for (const chip of document.querySelectorAll(".chip")) {
@@ -477,6 +498,13 @@ function renderInbox() {
   els.lastRefreshed.textContent = inbox.fetchedAt
     ? `Last refreshed ${fmtTime.format(new Date(inbox.fetchedAt))}. Refreshes in the background every 30 minutes.`
     : "";
+
+  els.inboxList.classList.toggle("savedlist", state.filter === "saved");
+  els.inboxList.setAttribute("aria-label", state.filter === "saved" ? "Saved VODs" : "Channels");
+  if (state.filter === "saved") {
+    renderSavedView();
+    return;
+  }
 
   const frag = document.createDocumentFragment();
   let shown = 0;
@@ -513,6 +541,95 @@ function renderInbox() {
   } else {
     els.inboxEmpty.hidden = true;
   }
+}
+
+/* ---------- saved for later ---------- */
+
+function renderSavedView() {
+  const list = state.inbox.saved || [];
+  els.inboxList.textContent = "";
+  els.inboxEmpty.textContent = "";
+  if (list.length === 0) {
+    els.inboxEmpty.hidden = false;
+    els.inboxEmpty.append(
+      emptyBlock("🔖", "Nothing saved yet", "Hit the bookmark on any VOD to keep it here until you've watched it, with a countdown to when Twitch deletes it.")
+    );
+    return;
+  }
+  els.inboxEmpty.hidden = true;
+
+  const frag = document.createDocumentFragment();
+  for (const vod of list) {
+    const ch = vod.channel || {};
+    const li = document.createElement("li");
+    li.dataset.id = vod.id;
+    if (vod.gone) li.classList.add("gone");
+
+    const who = document.createElement("div");
+    who.className = "who";
+    const img = document.createElement("img");
+    img.className = "avatar";
+    img.alt = "";
+    img.loading = "lazy";
+    if (ch.avatar) img.src = ch.avatar;
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = ch.name || ch.login || "Channel";
+    who.append(img, name);
+
+    const controls = document.createElement("div");
+    controls.className = "controls";
+    if (!vod.gone) {
+      const watch = makeButton(vod.watched ? "Watch again" : "Watch", () => openVod(vod, ch), vod.watched ? "secondary" : "");
+      if (vod.resume > 5 && !vod.watched) watch.title = `Resume from ${formatDuration(vod.resume)}`;
+      const mark = makeButton(vod.watched ? "Mark unread" : "Mark read", () => setWatched([vod.id], !vod.watched), "secondary");
+      mark.setAttribute("aria-pressed", String(vod.watched));
+      controls.append(watch, mark);
+    }
+    controls.appendChild(makeButton("Remove", () => toggleSaved(vod, ch), "secondary"));
+
+    li.append(who, renderVod(vod, ch, true), controls);
+    frag.appendChild(li);
+  }
+  els.inboxList.appendChild(frag);
+}
+
+const BOOKMARK_SVG =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>';
+
+function saveButton(vod, ch) {
+  const b = makeButton("", () => toggleSaved(vod, ch), "icon save" + (vod.saved ? " on" : ""));
+  b.innerHTML = BOOKMARK_SVG;
+  b.setAttribute("aria-pressed", String(!!vod.saved));
+  b.setAttribute("aria-label", vod.saved ? "Remove from saved" : "Save for later");
+  b.title = vod.saved ? "Remove from saved" : "Save for later";
+  return b;
+}
+
+// Flip the saved state locally first so the page never waits on storage.
+async function toggleSaved(vod, ch) {
+  const on = !vod.saved;
+  applySaved(vod, ch, on);
+  const channel = { id: ch.id, login: ch.login, name: ch.name, avatar: ch.avatar };
+  const res = await send({ type: "SET_SAVED", id: vod.id, saved: on, vod, channel });
+  if (!res.ok) {
+    applySaved(vod, ch, !on);
+    showBanner("Couldn't update saved VODs (" + res.error + ").", "", null);
+  }
+}
+
+function applySaved(vod, ch, on) {
+  if (!state.inbox) return;
+  for (const c of state.inbox.channels) for (const v of c.vods) if (v.id === vod.id) v.saved = on;
+  const list = state.inbox.saved || (state.inbox.saved = []);
+  const i = list.findIndex((v) => v.id === vod.id);
+  if (on && i === -1) {
+    list.push({ ...vod, saved: true, savedAt: Date.now(), gone: 0, channel: { id: ch.id, login: ch.login, name: ch.name, avatar: ch.avatar } });
+    list.sort((a, b) => (a.gone ? 1 : 0) - (b.gone ? 1 : 0) || a.expiresAt - b.expiresAt);
+  } else if (!on && i !== -1) {
+    list.splice(i, 1);
+  }
+  renderInbox();
 }
 
 function emptyBlock(icon, title, text) {
@@ -609,6 +726,7 @@ function renderChannelRow(ch, view) {
     const btn = makeButton(view.primary.watched ? "Watch again" : "Catch up", () => openVod(view.primary, ch), view.primary.watched ? "secondary" : "");
     if (view.primary.resume > 5 && !view.primary.watched) btn.title = `Resume from ${formatDuration(view.primary.resume)}`;
     controls.appendChild(btn);
+    controls.appendChild(saveButton(view.primary, ch));
   }
   const chev = makeButton("", () => toggleExpanded(ch.id), "icon chev");
   chev.setAttribute("aria-label", expanded ? "Collapse" : `Show all VODs for ${ch.name}`);
@@ -651,7 +769,12 @@ function renderVod(vod, ch, showTitleAttr) {
   const tw = document.createElement("div");
   tw.className = "thumb-wrap";
   const isProcessing = !vod.thumbnail || vod.thumbnail.includes("404_processing") || vod.thumbnail.includes("_404/");
-  if (isProcessing) {
+  if (vod.gone) {
+    const ph = document.createElement("div");
+    ph.className = "thumb placeholder";
+    ph.textContent = "Expired";
+    tw.appendChild(ph);
+  } else if (isProcessing) {
     const ph = document.createElement("div");
     ph.className = "thumb placeholder";
     ph.textContent = ch.live ? "LIVE NOW" : "Processing";
@@ -710,6 +833,17 @@ function renderVod(vod, ch, showTitleAttr) {
     line1.appendChild(s);
   });
 
+  const exp = expiryInfo(vod);
+  if (exp) {
+    const sep = document.createElement("span");
+    sep.className = "sep";
+    const e = document.createElement("span");
+    e.className = "expiry" + (exp.soon ? " soon" : "");
+    e.textContent = exp.text;
+    e.title = exp.gone ? "Twitch no longer has this VOD." : EXPIRY_TITLE;
+    line1.append(sep, e);
+  }
+
   info.append(title, line1);
   wrap.append(tw, info);
   return wrap;
@@ -737,7 +871,7 @@ function renderVodList(ch, view) {
     if (vod.resume > 5 && !vod.watched) watch.title = `Resume from ${formatDuration(vod.resume)}`;
     const mark = makeButton(vod.watched ? "Mark unread" : "Mark read", () => setWatched([vod.id], !vod.watched), "secondary");
     mark.setAttribute("aria-pressed", String(vod.watched));
-    controls.append(watch, mark);
+    controls.append(watch, mark, saveButton(vod, ch));
     li.appendChild(controls);
     ul.appendChild(li);
   }
@@ -766,6 +900,7 @@ function applyWatched(ids, on) {
     for (const v of ch.vods) if (set.has(v.id)) v.watched = on;
     ch.unread = ch.vods.filter((v) => !v.watched).length;
   }
+  for (const v of state.inbox.saved || []) if (set.has(v.id)) v.watched = on;
   renderInbox();
 }
 
@@ -805,6 +940,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
       for (const v of ch.vods) v.watched = !!watched[v.id];
       ch.unread = ch.vods.filter((v) => !v.watched).length;
     }
+    for (const v of state.inbox.saved || []) v.watched = !!watched[v.id];
     renderInbox();
   }
   if (changes.resume) {
@@ -812,6 +948,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     for (const ch of state.inbox.channels) {
       for (const v of ch.vods) v.resume = resume[v.id] ? resume[v.id].seconds || 0 : 0;
     }
+    for (const v of state.inbox.saved || []) v.resume = resume[v.id] ? resume[v.id].seconds || 0 : 0;
     renderInbox();
   }
   if (changes.authExpired && changes.authExpired.newValue) showReconnectBanner();

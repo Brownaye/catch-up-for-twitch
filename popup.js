@@ -7,6 +7,7 @@ const els = {
   unread: document.getElementById("unread"),
   unreadLabel: document.getElementById("unreadLabel"),
   openBtn: document.getElementById("openBtn"),
+  savedLine: document.getElementById("savedLine"),
   settingsSection: document.getElementById("settingsSection"),
   lookbackDays: document.getElementById("lookbackDays"),
   sleepStart: document.getElementById("sleepStart"),
@@ -63,6 +64,7 @@ async function renderConnection(status) {
     els.unread.textContent = "–";
     els.unread.classList.add("zero");
     els.unreadLabel.textContent = "no channels picked yet";
+    els.savedLine.hidden = true;
     els.openBtn.textContent = "Pick channels";
     setStatus(`Connected as ${status.userName || status.userLogin || "you"}.`);
     return;
@@ -75,6 +77,11 @@ async function renderConnection(status) {
   els.unread.classList.toggle("zero", n === 0);
   els.unreadLabel.textContent =
     (n === 1 ? "unread VOD" : "unread VODs") + ` across ${status.selectedCount} channel${status.selectedCount === 1 ? "" : "s"}`;
+  const saved = res.ok ? res.saved || 0 : 0;
+  const soon = res.ok ? res.expiringSoon || 0 : 0;
+  els.savedLine.hidden = saved === 0;
+  els.savedLine.textContent =
+    `${saved} saved for later` + (soon ? ` · ${soon} expir${soon === 1 ? "es" : "e"} within 2 days` : "");
   setStatus(`Connected as ${status.userName || status.userLogin || "you"}. Refreshes every 30 minutes.`);
 }
 

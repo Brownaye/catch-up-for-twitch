@@ -20,6 +20,11 @@ const USER_CACHE_TTL = 24 * 60 * 60 * 1000; // names + avatars change rarely
 const REFRESH_ALARM = "catchup-refresh";
 const REFRESH_MINUTES = 30;
 const PRUNE_AFTER_MS = 90 * 24 * 60 * 60 * 1000; // watched / resume entries older than this are dropped
+const GONE_PRUNE_MS = 30 * 24 * 60 * 60 * 1000;  // saved VODs that expired this long ago are dropped
+const EXPIRING_SOON_MS = 48 * 60 * 60 * 1000;    // "expires soon" threshold for the popup count
+// How long Twitch keeps past broadcasts, by broadcaster_type. Prime / Turbo
+// channels also get 60 days but Helix cannot tell us that, so "" is a floor.
+const RETENTION_DAYS = { partner: 60, affiliate: 14, "": 7 };
 const VOD_CONCURRENCY = 4;                // parallel /videos requests
 const VODS_PER_CHANNEL = 100;             // Helix max per request; covers a 60-day window for daily streamers
 const BADGE_COLOR = "#9147ff";
@@ -285,7 +290,7 @@ async function ensureUsers(cache, ids, force = false) {
   const now = Date.now();
   const stale = [...new Set(ids)].filter((id) => {
     const u = cache.users[id];
-    return force || !u || now - (u.fetchedAt || 0) > USER_CACHE_TTL;
+    return force || !u || u.type === undefined || now - (u.fetchedAt || 0) > USER_CACHE_TTL;
   });
   if (stale.length === 0) return;
 
@@ -299,6 +304,7 @@ async function ensureUsers(cache, ids, force = false) {
         login: u.login,
         name: u.display_name,
         avatar: u.profile_image_url,
+        type: u.broadcaster_type || "",
         fetchedAt: now,
       };
     }
@@ -394,13 +400,109 @@ async function fetchLive(cache, ids, force) {
   return cache.live;
 }
 
+/* ---------- saved for later ---------- */
+
+// saved: { [vodId]: { savedAt, channelId, vod: <normalizeVod()>, channel: {login, name, avatar, type}, gone? } }
+// The snapshot lets a saved VOD outlive the lookback window and its
+// channel being unticked; `gone` is stamped when Twitch no longer has it.
+async function loadSaved() {
+  const { saved } = await getStored(["saved"]);
+  return saved && typeof saved === "object" ? saved : {};
+}
+
+function retentionDays(type) {
+  return RETENTION_DAYS[type] || RETENTION_DAYS[""];
+}
+
+// Estimated deletion time: created_at + the channel's retention period.
+function expiresAt(vod, channel) {
+  const start = Date.parse(vod.createdAt);
+  if (!Number.isFinite(start)) return 0;
+  return start + retentionDays(channel && channel.type) * 24 * 60 * 60 * 1000;
+}
+
+async function setSaved(id, on, vod, channel) {
+  const saved = await loadSaved();
+  if (on) {
+    if (!vod || !vod.id) throw new Error("No VOD to save.");
+    const cache = await loadCache();
+    const user = cache.users[channel && channel.id] || {};
+    saved[id] = {
+      savedAt: saved[id] ? saved[id].savedAt : Date.now(),
+      channelId: vod.channelId || (channel && channel.id) || "",
+      vod: {
+        id: vod.id,
+        channelId: vod.channelId,
+        title: vod.title || "",
+        createdAt: vod.createdAt,
+        duration: vod.duration || 0,
+        durationText: vod.durationText || "",
+        thumbnail: vod.thumbnail || "",
+        url: vod.url || `https://www.twitch.tv/videos/${vod.id}`,
+        views: vod.views || 0,
+        streamId: vod.streamId || null,
+      },
+      channel: {
+        login: (channel && channel.login) || user.login || "",
+        name: (channel && channel.name) || user.name || "",
+        avatar: (channel && channel.avatar) || user.avatar || "",
+        type: user.type !== undefined ? user.type : (channel && channel.type) || "",
+      },
+    };
+  } else {
+    delete saved[id];
+  }
+  await setStored({ saved });
+  return Object.keys(saved).length;
+}
+
+// Ask Twitch which saved VODs still exist (100 ids per request) and refresh
+// their snapshots. Helix drops ids it cannot find and answers 404 when none
+// of them exist, so anything not returned has been deleted.
+async function verifySaved(cache, force) {
+  const saved = await loadSaved();
+  const ids = Object.keys(saved);
+  if (ids.length === 0) return 0;
+  const now = Date.now();
+  if (!force && now - (cache.savedCheckedAt || 0) < CACHE_TTL) return 0;
+
+  let errors = 0;
+  for (const batch of chunk(ids, 100)) {
+    const found = new Map();
+    try {
+      const json = await helixGet("/videos", batch.map((id) => ["id", id]));
+      for (const v of json.data || []) found.set(v.id, normalizeVod(v));
+    } catch (err) {
+      if (err.code === "unauthorized" || err.code === "not_connected") throw err;
+      if (!(err.code === "http" && err.status === 404)) {
+        errors++;
+        continue; // leave this batch as it was
+      }
+    }
+    for (const id of batch) {
+      const entry = saved[id];
+      const fresh = found.get(id);
+      if (fresh) {
+        entry.vod = { ...entry.vod, ...fresh };
+        delete entry.gone;
+      } else if (!entry.gone) {
+        entry.gone = now;
+      }
+    }
+  }
+  cache.savedCheckedAt = now;
+  await setStored({ saved });
+  return errors;
+}
+
 /* ---------- inbox ---------- */
 
 // Build the inbox from the cache: one entry per selected channel with the
 // VODs that fall inside the lookback window, newest first, plus flags the
 // UI needs. Pure function of (cache, selected, settings, watched, resume).
-function buildInbox(cache, selected, settings, watched, resume) {
+function buildInbox(cache, selected, settings, watched, resume, saved) {
   const now = Date.now();
+  saved = saved || {};
   const windowStart = now - settings.lookbackDays * 24 * 60 * 60 * 1000;
   let unread = 0;
 
@@ -413,6 +515,8 @@ function buildInbox(cache, selected, settings, watched, resume) {
         ...v,
         watched: !!(watched && watched[v.id]),
         resume: resume && resume[v.id] ? resume[v.id].seconds || 0 : 0,
+        saved: !!saved[v.id],
+        expiresAt: expiresAt(v, user),
       }));
     const unreadHere = vods.filter((v) => !v.watched).length;
     unread += unreadHere;
@@ -435,7 +539,36 @@ function buildInbox(cache, selected, settings, watched, resume) {
   });
 
   channels.sort((a, b) => b.latestAt - a.latestAt || a.name.localeCompare(b.name));
-  return { channels, unread, fetchedAt: cache.live.fetchedAt || 0 };
+
+  // Saved VODs as a flat list, soonest to expire first, expired ones last.
+  const savedList = Object.values(saved)
+    .filter((e) => e && e.vod && e.vod.id)
+    .map((e) => {
+      const user = cache.users[e.channelId] || {};
+      const channel = {
+        id: e.channelId,
+        login: user.login || e.channel.login || "",
+        name: user.name || e.channel.name || e.channel.login || `Channel ${e.channelId}`,
+        avatar: user.avatar || e.channel.avatar || "",
+        type: user.type !== undefined ? user.type : e.channel.type || "",
+      };
+      // Prefer the live cache entry for a channel that is still ticked.
+      const cached = cache.vods[e.channelId] && cache.vods[e.channelId].items.find((v) => v.id === e.vod.id);
+      const vod = cached || e.vod;
+      return {
+        ...vod,
+        watched: !!(watched && watched[vod.id]),
+        resume: resume && resume[vod.id] ? resume[vod.id].seconds || 0 : 0,
+        saved: true,
+        savedAt: e.savedAt || 0,
+        gone: e.gone || 0,
+        expiresAt: expiresAt(vod, channel),
+        channel,
+      };
+    });
+  savedList.sort((a, b) => (a.gone ? 1 : 0) - (b.gone ? 1 : 0) || a.expiresAt - b.expiresAt);
+
+  return { channels, unread, saved: savedList, fetchedAt: cache.live.fetchedAt || 0 };
 }
 
 // Refresh (respecting the 5-minute cache unless `force`) and return the
@@ -496,10 +629,24 @@ async function refreshInbox(force) {
     }
   }
 
+  // Saved VODs may belong to unticked channels; check they still exist and
+  // make sure we know each channel's type for the expiry estimate.
+  if (!authError) {
+    try {
+      const saved = await loadSaved();
+      const savedChannels = [...new Set(Object.values(saved).map((e) => e.channelId).filter(Boolean))];
+      if (savedChannels.length) await ensureUsers(cache, savedChannels, false);
+      errors += await verifySaved(cache, force);
+    } catch (err) {
+      if (err.code === "unauthorized" || err.code === "not_connected") authError = err;
+      else errors++;
+    }
+  }
+
   await saveCache(cache);
 
-  const { watched, resume } = await getStored(["watched", "resume"]);
-  const inbox = buildInbox(cache, selected, settings, watched || {}, resume || {});
+  const { watched, resume, saved } = await getStored(["watched", "resume", "saved"]);
+  const inbox = buildInbox(cache, selected, settings, watched || {}, resume || {}, saved || {});
   await renderBadge(inbox.unread);
 
   if (authError) {
@@ -510,13 +657,13 @@ async function refreshInbox(force) {
 
 // Recompute the unread count from what is already cached (no network).
 async function refreshBadgeFromCache() {
-  const { accessToken, watched, resume } = await getStored(["accessToken", "watched", "resume"]);
+  const { accessToken, watched, resume, saved } = await getStored(["accessToken", "watched", "resume", "saved"]);
   if (!accessToken) {
     await renderBadge(0);
     return;
   }
   const [selected, settings, cache] = await Promise.all([getSelectedChannels(), getSettings(), loadCache()]);
-  const inbox = buildInbox(cache, selected, settings, watched || {}, resume || {});
+  const inbox = buildInbox(cache, selected, settings, watched || {}, resume || {}, saved || {});
   await renderBadge(inbox.unread);
 }
 
@@ -537,7 +684,7 @@ async function setWatched(ids, on) {
 
 async function markAllRead() {
   const [selected, settings, cache] = await Promise.all([getSelectedChannels(), getSettings(), loadCache()]);
-  const inbox = buildInbox(cache, selected, settings, {}, {});
+  const inbox = buildInbox(cache, selected, settings, {}, {}, {});
   const ids = inbox.channels.flatMap((c) => c.vods.map((v) => v.id));
   await setWatched(ids, true);
   return ids.length;
@@ -559,7 +706,12 @@ async function pruneOld() {
       r[id] = val;
     }
   }
-  await setStored({ watched: w, resume: r });
+  const saved = await loadSaved();
+  const goneCutoff = Date.now() - GONE_PRUNE_MS;
+  for (const [id, e] of Object.entries(saved)) {
+    if (!e || !e.vod || (e.gone && e.gone < goneCutoff)) delete saved[id];
+  }
+  await setStored({ watched: w, resume: r, saved });
 }
 
 /* ---------- opening a VOD ---------- */
@@ -695,17 +847,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     case "GET_UNREAD":
       return reply(
         (async () => {
-          const { accessToken, watched, resume } = await getStored(["accessToken", "watched", "resume"]);
+          const { accessToken, watched, resume, saved } = await getStored(["accessToken", "watched", "resume", "saved"]);
           if (!accessToken) return { ok: false, error: "not_connected" };
           const [selected, settings, cache] = await Promise.all([getSelectedChannels(), getSettings(), loadCache()]);
-          const inbox = buildInbox(cache, selected, settings, watched || {}, resume || {});
-          return { ok: true, unread: inbox.unread, channels: inbox.channels.length };
+          const inbox = buildInbox(cache, selected, settings, watched || {}, resume || {}, saved || {});
+          const now = Date.now();
+          const expiringSoon = inbox.saved.filter(
+            (v) => !v.gone && !v.watched && v.expiresAt && v.expiresAt - now < EXPIRING_SOON_MS
+          ).length;
+          return { ok: true, unread: inbox.unread, channels: inbox.channels.length, saved: inbox.saved.length, expiringSoon };
         })(),
         sendResponse
       );
 
     case "MARK_WATCHED":
       return reply(setWatched(message.ids || [], message.watched !== false).then(() => ({ ok: true })), sendResponse);
+
+    case "SET_SAVED":
+      return reply(
+        setSaved(message.id, message.saved !== false, message.vod, message.channel).then((count) => ({ ok: true, count })),
+        sendResponse
+      );
 
     case "MARK_ALL_READ":
       return reply(markAllRead().then((count) => ({ ok: true, count })), sendResponse);

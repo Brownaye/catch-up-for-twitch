@@ -133,6 +133,26 @@
     .vod .line .sep::before { content: "·"; }
     .vod.watched .thumb-wrap, .vod.watched .info { opacity: 0.5; }
     .vod .tick { color: var(--ok); font-weight: 700; }
+    .vod .expiry.soon { color: var(--warn); font-weight: 600; }
+
+    /* Bookmark toggle: outline normally, filled purple once saved. */
+    button.save.on { color: var(--accent); }
+    button.save.on svg { fill: currentColor; }
+
+    /* Saved tab: #inboxList switches to a flat list, one VOD per row with its channel on the left. */
+    .savedlist > li {
+      display: grid;
+      grid-template-columns: 200px 1fr auto;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+    }
+    .savedlist .who { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; }
+    .savedlist .who .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .savedlist .who .avatar { width: 36px; height: 36px; }
+    .savedlist .controls { display: flex; align-items: center; gap: 6px; }
+    .savedlist .controls button { padding: 6px 10px; font-size: 12px; }
+    .savedlist li.gone .thumb-wrap, .savedlist li.gone .info { opacity: 0.5; }
 
     .vodlist { list-style: none; margin: 0; padding: 4px 14px 12px 46px; background: rgba(0, 0, 0, 0.18); }
     .vodlist li {
@@ -159,6 +179,8 @@
     @media (max-width: 720px) {
       .chan { grid-template-columns: 14px 1fr auto; }
       .chan .vod { grid-column: 2 / span 2; }
+      .savedlist > li { grid-template-columns: 1fr auto; }
+      .savedlist .vod { grid-column: 1 / span 2; }
       .vod .thumb { width: 96px; height: 54px; }
       .vodlist { padding-left: 14px; }
     }
@@ -255,6 +277,7 @@
         <button class="chip" data-filter="all" aria-pressed="true">All</button>
         <button class="chip" data-filter="asleep" aria-pressed="false">Missed while asleep <span class="count" id="countAsleep"></span></button>
         <button class="chip" data-filter="unread" aria-pressed="false">Unread <span class="count" id="countUnread"></span></button>
+        <button class="chip" data-filter="saved" aria-pressed="false">Saved <span class="count" id="countSaved"></span></button>
       </div>
       <div class="empty-state" id="inboxEmpty" hidden></div>
       <ul id="inboxList" aria-label="Channels"></ul>

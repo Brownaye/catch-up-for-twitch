@@ -51,6 +51,7 @@ const state = {
   inbox: null,            // GET_INBOX result
   filter: "all",          // all | asleep | unread
   expanded: new Set(),    // channel ids with the VOD list open
+  caughtUpDismissed: false, // "You're caught up" block hidden via its Clear button until something new arrives
   loading: false,
 };
 
@@ -464,6 +465,7 @@ function renderInbox() {
   const unreadTotal = allVods.filter((v) => !v.watched).length;
   const asleepUnread = allVods.filter((v) => !v.watched && overlapsSleep(v, state.settings)).length;
   setUnreadPill(unreadTotal);
+  if (unreadTotal > 0) state.caughtUpDismissed = false;
   els.countUnread.textContent = unreadTotal ? `(${unreadTotal})` : "";
   els.countAsleep.textContent = asleepUnread ? `(${asleepUnread})` : "";
   els.markAllBtn.disabled = unreadTotal === 0;
@@ -496,9 +498,15 @@ function renderInbox() {
       emptyBlock("📺", "No channels picked yet", "Choose the channels you want to catch up on."),
       makeButton("Pick channels", () => openPicker(false))
     );
-  } else if (unreadTotal === 0) {
+  } else if (unreadTotal === 0 && !state.caughtUpDismissed) {
     els.inboxEmpty.hidden = false;
-    els.inboxEmpty.append(emptyBlock("✅", "You're caught up", `Nothing unwatched from the last ${plural(state.settings.lookbackDays, "day")}. Nice.`));
+    els.inboxEmpty.append(
+      emptyBlock("✅", "You're caught up", `Nothing unwatched from the last ${plural(state.settings.lookbackDays, "day")}. Nice.`),
+      makeButton("Clear", () => {
+        state.caughtUpDismissed = true;
+        renderInbox();
+      }, "secondary")
+    );
   } else if (shown === 0 && state.filter === "asleep") {
     els.inboxEmpty.hidden = false;
     els.inboxEmpty.append(emptyBlock("🌙", "Nothing streamed while you slept", `No unwatched VODs overlapped ${state.settings.sleepStart}–${state.settings.sleepEnd} in the last ${plural(state.settings.lookbackDays, "day")}.`));
